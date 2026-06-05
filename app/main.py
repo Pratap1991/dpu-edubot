@@ -192,8 +192,8 @@ if "Student" in role:
                 st.markdown(" ".join([f'<span class="source-chip">📄 {s}</span>' for s in msg["sources"]]), unsafe_allow_html=True)
             if msg.get("erp_link"):
                 st.link_button(f"🔗 {msg.get('erp_label','Open ERP')}", msg["erp_link"])
-            if msg.get("escalate"):
-                st.warning("⚠️ Low confidence — please verify with your mentor or raise a support ticket on ERP → Student Support Ticket.", icon="⚠️")
+           # if msg.get("escalate"):
+           #     st.warning("⚠️ Low confidence — please verify with your mentor or raise a support ticket on ERP → Student Support Ticket.", icon="⚠️")
     if prompt := st.chat_input(f"Ask about {batch_label.split('—')[0].strip()}..."):
         st.session_state.messages.append({"role":"user","content":prompt})
         with st.chat_message("user", avatar="👤"): st.markdown(prompt)
@@ -206,8 +206,8 @@ if "Student" in role:
                 st.markdown(" ".join([f'<span class="source-chip">📄 {s}</span>' for s in result["sources"]]), unsafe_allow_html=True)
             if result.get("erp_link"):
                 st.link_button(f"🔗 {result.get('erp_label','Open ERP')}", result["erp_link"])
-            if result.get("escalate"):
-                st.warning("⚠️ Low confidence — please verify with your mentor or raise a support ticket on ERP → Student Support Ticket.", icon="⚠️")
+           # if result.get("escalate"):
+           #     st.warning("⚠️ Low confidence — please verify with your mentor or raise a support ticket on ERP → Student Support Ticket.", icon="⚠️")
         st.session_state.messages.append({"role":"assistant","content":result["answer"],"sources":result.get("sources",[]),"erp_link":result.get("erp_link"),"erp_label":result.get("erp_label",""),"escalate":result.get("escalate",False)})
     if st.session_state.messages:
         if st.button("🗑️ Clear conversation", type="secondary"): st.session_state.messages = []; st.rerun()
