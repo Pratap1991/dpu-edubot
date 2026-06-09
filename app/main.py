@@ -173,17 +173,14 @@ if "Student" in role:
         with st.chat_message("assistant", avatar="🎓"):
             st.markdown(f"""**Namaste! I'm DPU EduBot 👋**\n\nI'm your official learning assistant for **{batch_label}** at Dr. D.Y. Patil Centre for Online Learning.\n\nI can help you with:\n- 📚 LMS access, live sessions, recordings\n- 📝 Assignment submission process\n- 💰 Fee payment and structure\n- 📋 Exam forms, admit cards, results\n- 🎯 Specialization selection\n- 🎫 Support ticket guidance\n- 📦 Books and dispatch queries\n- 👤 Profile and document updates\n\nTry asking me something! 👇""")
             st.markdown("**Quick questions to try:**")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("How do I submit my assignment?"):
-                    st.session_state.messages.append({"role":"user","content":"How do I submit my assignment?"}); st.rerun()
-                if st.button("What are my MBA Sem 1 subjects?"):
-                    st.session_state.messages.append({"role":"user","content":"What are my MBA Sem 1 subjects?"}); st.rerun()
-            with c2:
-                if st.button("My payment failed — which ticket?"):
-                    st.session_state.messages.append({"role":"user","content":"My payment failed — which support ticket do I raise?"}); st.rerun()
-                if st.button("How do I join a live lecture?"):
-                    st.session_state.messages.append({"role":"user","content":"How do I join a live lecture on LMS?"}); st.rerun()
+        st.markdown("""
+💬 *Try asking any of these in the chat below:*
+
+- How do I submit my assignment?
+- My payment failed — which ticket?
+- What are my MBA Sem 1 subjects?
+- How do I join a live lecture?
+""")
     for msg in st.session_state.messages:
         avatar = "🎓" if msg["role"] == "assistant" else "👤"
         with st.chat_message(msg["role"], avatar=avatar):
