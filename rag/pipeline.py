@@ -46,25 +46,9 @@ def check_layer0(query: str) -> dict | None:
     If no, return None and proceed to RAG.
     """
     q = query.lower().strip()
-    for trigger in LAYER0_TRIGGERS:
+    for trigger, category in LAYER0_TRIGGERS.items():
         if trigger in q:
-            # Map trigger to redirect bucket
-            if "attendance" in trigger:
-                return LAYER0_REDIRECTS["attendance"]
-            if any(x in trigger for x in ["fee", "payment", "receipt"]):
-                return LAYER0_REDIRECTS["fees"]
-            if any(x in trigger for x in ["result", "marks", "grade", "cgpa"]):
-                return LAYER0_REDIRECTS["result"]
-            if any(x in trigger for x in ["admit card", "hall ticket"]):
-                return LAYER0_REDIRECTS["admit_card"]
-            if any(x in trigger for x in ["assignment status", "did i submit", "my submission"]):
-                return LAYER0_REDIRECTS["assignment_status"]
-            if "mentor" in trigger:
-                return LAYER0_REDIRECTS["mentor"]
-            if any(x in trigger for x in ["profile", "erp id", "prn", "student id"]):
-                return LAYER0_REDIRECTS["profile"]
-            if "backlog" in trigger:
-                return LAYER0_REDIRECTS["result"]
+            return LAYER0_REDIRECTS[category]
     return None
 
 

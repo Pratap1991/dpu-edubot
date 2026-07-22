@@ -71,6 +71,18 @@ st.markdown("""
 .heat-cell{display:inline-block;width:36px;height:28px;border-radius:4px;line-height:28px;text-align:center;font-size:11px;font-weight:600;margin:2px}
 .adm-divider{border:none;border-top:1px solid rgba(255,255,255,0.06);margin:12px 0}
 .escalate-note{background:#fff0ee;border-left:3px solid #d4522a;padding:10px 14px;border-radius:6px;font-size:13px;margin:6px 0}
+.login-icon{width:44px;height:44px;border-radius:12px;background:rgba(183,32,46,0.1);display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:10px}
+.login-title{font-size:19px;font-weight:700;color:#1a1a2e;margin-bottom:2px}
+.login-sub{font-size:12.5px;color:#64748b;margin-bottom:16px}
+.role-card{border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px}
+.role-card-emoji{font-size:22px}
+.role-card-lbl{font-size:14px;font-weight:600;color:#1a1a2e}
+.role-card-sub{font-size:11px;color:#64748b}
+div[role="dialog"] button[kind="primary"]{background:#b7202e!important;border-color:#b7202e!important;border-radius:10px!important;font-weight:600!important}
+div[role="dialog"] button[kind="secondary"]{border-radius:10px!important}
+div[role="dialog"] .stTextInput input{border-radius:9px!important}
+.sb-locked{font-size:12px;color:#fbbf24;padding:10px;background:rgba(251,191,36,0.08);border-radius:8px;text-align:center;margin-top:8px}
+.sb-user{font-size:12px;color:#c8d4e8;padding:10px 12px;background:rgba(255,255,255,0.05);border-radius:8px;line-height:1.6}
 </style>
 """, unsafe_allow_html=True)
 
@@ -82,6 +94,77 @@ LANGUAGES = {"English 🇬🇧": "English", "हिंदी 🇮🇳": "Hindi",
 KB_PATH     = "data/knowledge_base.json"
 ADMIN_PWD   = os.getenv("ADMIN_PASSWORD",  "admin@dpu2026")
 FACULTY_PWD = os.getenv("FACULTY_PASSWORD","faculty@dpu2026")
+
+# Demo ERP directory — ERP ID + first name as password (POC only)
+from data.mock_students import MOCK_STUDENTS
+STUDENTS = MOCK_STUDENTS
+
+ROLE_ICON = {"Student": "🎓", "Admin": "⚙️", "Faculty": "👩‍🏫"}
+
+
+def erp_personal_answer(query: str, student: dict, language: str) -> str:
+    """Answer a personal ERP query for a logged-in student using their verified
+    mock ERP record — same approach as erp_demo.py, reused here so the
+    authenticated chat can show real personalised answers, not a blank redirect."""
+    from rag.pipeline import client, CHAT_MODEL
+
+    context = f"""=== VERIFIED ERP DATA FOR {student['name']} ===
+
+Student: {student['name']}
+Program: {student['program']}
+Batch: {student['batch']}, Semester {student['semester']}
+Specialization: {student['specialization']}
+Mentor: {student['mentor']}
+
+FEES:
+- Total program fee: Rs {student['fees']['total']:,}
+- Paid so far: Rs {student['fees']['paid']:,}
+- Outstanding: Rs {student['fees']['outstanding']:,}
+- Sem 1: {student['fees']['sem1']}
+- Sem 2: {student['fees']['sem2']}
+
+ASSIGNMENTS:
+- Total: {student['assignments']['total']}
+- Submitted: {student['assignments']['submitted']}
+- Pending: {student['assignments']['pending']}
+- Pending list: {', '.join(student['assignments']['pending_list']) if student['assignments']['pending_list'] else 'None'}
+
+EXAMINATION:
+- Exam form: {student['exam']['form']}
+- Admit card: {student['exam']['admit_card']}
+- Exam date: {student['exam']['exam_date']}
+- Result: {student['exam']['result']}
+- Backlog subjects: {', '.join(student['exam']['backlog']) if student['exam']['backlog'] else 'None'}
+
+ATTENDANCE: {student['attendance']}%
+
+BOOKS DISPATCH: {student['books']}"""
+
+    system_prompt = f"""You are DPU EduBot answering a personal query for an enrolled student.
+
+STRICT RULES:
+1. Use ONLY the verified ERP data below. Never invent numbers, dates, or details.
+2. Address the student by their first name.
+3. Be warm, concise, and helpful — like a kind mentor.
+4. If their data shows an issue (overdue fees, pending assignments), be direct but supportive.
+5. End with a clear next step where useful.
+6. Respond in {language}.
+
+{context}"""
+
+    try:
+        response = client.chat.completions.create(
+            model=CHAT_MODEL,
+            temperature=0.1,
+            max_tokens=400,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query}
+            ]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"⚠️ Error reaching OpenAI: {str(e)}"
 
 @st.cache_data
 def load_kb():
@@ -116,6 +199,76 @@ def sla_label(elapsed, total):
     if rem < 12: return f"🟡 {rem}h left"
     return f"🟢 {rem}h left"
 
+# ── LOGIN GATE ───────────────────────────────────────────────────
+# Each role gets its own dedicated sign-in screen — never shown together.
+if "auth" not in st.session_state:
+    st.session_state.auth = {"logged_in": False, "role": None, "user": None}
+if "login_role" not in st.session_state:
+    st.session_state.login_role = None
+
+_dialog_fn = getattr(st, "dialog", None) or st.experimental_dialog
+
+@_dialog_fn("Welcome to DPU EduBot")
+def role_picker_dialog():
+    st.markdown("<div class='login-sub'>Please select how you'd like to sign in</div>", unsafe_allow_html=True)
+    if st.button("🎓  Continue as Student", use_container_width=True, key="pick_student"):
+        st.session_state.login_role = "Student"; st.rerun()
+    if st.button("⚙️  Continue as Admin", use_container_width=True, key="pick_admin"):
+        st.session_state.login_role = "Admin"; st.rerun()
+    if st.button("👩‍🏫  Continue as Faculty", use_container_width=True, key="pick_faculty"):
+        st.session_state.login_role = "Faculty"; st.rerun()
+
+@_dialog_fn("Sign in")
+def login_dialog():
+    login_role = st.session_state.login_role
+    st.markdown(f"<div class='login-icon'>{ROLE_ICON[login_role]}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='login-title'>{login_role} Login</div>", unsafe_allow_html=True)
+    if login_role == "Student":
+        st.markdown("<div class='login-sub'>Sign in using your DPU ERP credentials</div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='login-sub'>Sign in using your DPU {login_role.lower()} password</div>", unsafe_allow_html=True)
+
+    error = None
+    with st.form(key=f"login_form_{login_role}", border=False):
+        if login_role == "Student":
+            erp_id = st.text_input("ERP ID", placeholder="Enter your ERP ID (e.g. ERP001)")
+            pwd = st.text_input("Password", type="password", placeholder="Enter first name as password (e.g. Pratap)")
+        else:
+            erp_id = None
+            pwd = st.text_input("Password", type="password", placeholder=f"Enter {login_role.lower()} password")
+        submitted = st.form_submit_button("🔐 Sign In", type="primary", use_container_width=True)
+
+    if submitted:
+        if login_role == "Student":
+            student = STUDENTS.get((erp_id or "").strip().upper())
+            if student and (pwd or "").strip().lower() == student["name"].split()[0].lower():
+                st.session_state.auth = {"logged_in": True, "role": "Student", "user": {"erp_id": erp_id.strip().upper(), **student}}
+                st.session_state.login_role = None
+                st.rerun()
+            else:
+                error = "Invalid ERP ID or password."
+        else:
+            correct_pwd = ADMIN_PWD if login_role == "Admin" else FACULTY_PWD
+            if pwd == correct_pwd:
+                st.session_state.auth = {"logged_in": True, "role": login_role, "user": None}
+                st.session_state.login_role = None
+                st.rerun()
+            else:
+                error = "Incorrect password."
+    if error:
+        st.error(error)
+    if st.button("← Back", key="back_to_roles"):
+        st.session_state.login_role = None; st.rerun()
+
+if not st.session_state.auth["logged_in"]:
+    if st.session_state.login_role is None:
+        role_picker_dialog()
+    else:
+        login_dialog()
+
+role = st.session_state.auth["role"]
+user = st.session_state.auth["user"]
+
 # ── SIDEBAR ───────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""<div style='text-align:center;padding:16px 0 20px'>
@@ -124,44 +277,49 @@ with st.sidebar:
         <div style='font-size:10px;color:rgba(255,255,255,0.35);margin-top:3px'>Dr. D.Y. Patil Centre for Online Learning</div>
     </div>""", unsafe_allow_html=True)
     st.markdown("<hr style='border-color:rgba(255,255,255,0.06);margin:0 0 12px'>", unsafe_allow_html=True)
-    st.markdown("<p style='color:rgba(255,255,255,0.35);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px'>Select role</p>", unsafe_allow_html=True)
-    role = st.radio("Role", ["🎓 Student","⚙️ Admin","👩‍🏫 Faculty"], label_visibility="collapsed")
 
     admin_panel = "Dashboard"
-    if "Admin" in role:
-        st.markdown("<hr style='border-color:rgba(255,255,255,0.06);margin:10px 0'>", unsafe_allow_html=True)
-        pwd = st.text_input("Admin password", type="password", placeholder="Enter password")
-        if pwd and pwd != ADMIN_PWD:
-            st.error("Incorrect password"); st.stop()
-        elif not pwd:
-            st.markdown("<div style='font-size:12px;color:#fbbf24;padding:8px;background:rgba(251,191,36,0.08);border-radius:8px;text-align:center'>Enter admin password</div>", unsafe_allow_html=True); st.stop()
-        else:
+    if not st.session_state.auth["logged_in"]:
+        st.markdown("<div class='sb-locked'>🔒 Please sign in to continue</div>", unsafe_allow_html=True)
+    else:
+        who = f"{user['name']}<br/><span style='color:#7a8fa8;font-size:11px'>{user['erp_id']}</span>" if role == "Student" and user else role
+        st.markdown(f"<div class='sb-user'>{ROLE_ICON[role]} Logged in as<br/><b>{who}</b></div>", unsafe_allow_html=True)
+        if role == "Admin":
             st.markdown("<hr style='border-color:rgba(255,255,255,0.06);margin:10px 0'>", unsafe_allow_html=True)
             st.markdown("<p style='color:rgba(255,255,255,0.35);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px'>Admin panels</p>", unsafe_allow_html=True)
             admin_panel = st.radio("Panel", ["📊 Dashboard","🎫 Escalation Queue","⏱️ SLA Tracker","✉️ AI Reply Composer","📚 FAQ Manager","📈 Analytics","🗄️ Knowledge Base"], label_visibility="collapsed")
-
-    if "Faculty" in role:
         st.markdown("<hr style='border-color:rgba(255,255,255,0.06);margin:10px 0'>", unsafe_allow_html=True)
-        pwd = st.text_input("Faculty password", type="password", placeholder="Enter password")
-        if pwd and pwd != FACULTY_PWD:
-            st.error("Incorrect password"); st.stop()
-        elif not pwd:
-            st.markdown("<div style='font-size:12px;color:#fbbf24;padding:8px;background:rgba(251,191,36,0.08);border-radius:8px;text-align:center'>Enter faculty password</div>", unsafe_allow_html=True); st.stop()
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.auth = {"logged_in": False, "role": None, "user": None}
+            st.session_state.messages = []
+            st.rerun()
 
     st.markdown("<hr style='border-color:rgba(255,255,255,0.06);margin:10px 0'>", unsafe_allow_html=True)
     st.markdown("<div style='font-size:10px;color:rgba(255,255,255,0.25);text-align:center;line-height:1.8'>🔒 Answers grounded only in<br/>verified DPU data<br/>Personal data → ERP redirect</div>", unsafe_allow_html=True)
+
+if not st.session_state.auth["logged_in"]:
+    st.markdown("### 🎓 Student Chat")
+    st.caption("Ask anything about your program, exams, fees, LMS, assignments, or support tickets")
+    st.markdown("---")
+    st.info("👋 **Namaste! I'm DPU EduBot.** Please sign in from the popup to get started.")
+    st.stop()
 
 
 # ══════════════════════════════════════════════════════════════════
 # STUDENT VIEW — COMPLETELY UNCHANGED INCLUDING LAYER 0
 # ══════════════════════════════════════════════════════════════════
-if "Student" in role:
+if role == "Student":
     col1, col2, col3 = st.columns([2.5, 1.2, 1])
     with col1:
-        st.markdown("### 🎓 Student Chat")
+        st.markdown(f"### 🎓 Student Chat — {user['name']}" if user else "### 🎓 Student Chat")
         st.caption("Ask anything about your program, exams, fees, LMS, assignments, or support tickets")
     with col2:
-        batch_label = st.selectbox("Your batch", list(BATCHES.keys()), label_visibility="collapsed")
+        batch_keys = list(BATCHES.keys())
+        default_idx = 0
+        if user and user.get("batch"):
+            matches = [i for i, k in enumerate(batch_keys) if k.startswith(user["batch"])]
+            if matches: default_idx = matches[0]
+        batch_label = st.selectbox("Your batch", batch_keys, index=default_idx, label_visibility="collapsed")
     with col3:
         lang_label = st.selectbox("Language", list(LANGUAGES.keys()), label_visibility="collapsed")
     batch_id = BATCHES[batch_label]
@@ -198,6 +356,10 @@ if "Student" in role:
             with st.spinner("Looking up verified DPU information..."):
                 from rag.pipeline import answer
                 result = answer(prompt, batch_id, language)
+                if result.get("is_redirect") and user:
+                    result = {**result,
+                              "answer": erp_personal_answer(prompt, user, language),
+                              "sources": ["DPU ERP Student Record"]}
             st.markdown(result["answer"])
             if result.get("sources"):
                 st.markdown(" ".join([f'<span class="source-chip">📄 {s}</span>' for s in result["sources"]]), unsafe_allow_html=True)
@@ -214,7 +376,7 @@ if "Student" in role:
 # ══════════════════════════════════════════════════════════════════
 # ADMIN VIEW — PREMIUM ENTERPRISE DASHBOARD (Prompt 2 — UI only)
 # ══════════════════════════════════════════════════════════════════
-elif "Admin" in role:
+elif role == "Admin":
     kb = load_kb()
     total_faqs = sum(len(v["faqs"]) for v in kb["layer_1_faqs"].values())
     from rag.pipeline import index_exists
@@ -458,7 +620,7 @@ elif "Admin" in role:
 # ══════════════════════════════════════════════════════════════════
 # FACULTY VIEW — UNCHANGED
 # ══════════════════════════════════════════════════════════════════
-elif "Faculty" in role:
+elif role == "Faculty":
     st.markdown("### 👩‍🏫 Faculty Quick Access")
     kb = load_kb()
     c1,c2,c3 = st.columns(3)
