@@ -1,10 +1,10 @@
 venv/
 .env
-data/faiss_index/
 data/batch_uploads/
 __pycache__/
 *.pyc
 *.pkl
+!data/faiss_index/chunks.pkl
 .DS_Store
 *.egg-info/
 dist/
