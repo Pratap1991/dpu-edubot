@@ -62,31 +62,64 @@ def _csv_path(batch_id: str, doc_type: str) -> str:
     return os.path.join(_batch_dir(batch_id), f"{doc_type}.csv")
 
 
+def _normalize_col(name: str) -> str:
+    """Canonicalize a column name for comparison: strip BOM/whitespace, ignore
+    case, treat spaces/hyphens as underscores (e.g. 'course code' == 'Course_Code')."""
+    return (name or "").strip().lstrip("﻿").lower().replace(" ", "_").replace("-", "_")
+
+
+def _detect_delimiter(sample: str) -> str:
+    """Excel saves CSV with ';' instead of ',' on some regional locales — sniff
+    it instead of assuming comma, so a correctly-shaped export isn't rejected."""
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=",;\t").delimiter
+    except Exception:
+        return ","
+
+
 def validate_csv_columns(doc_type: str, header: list) -> list:
-    """Return the list of required columns missing from `header` (empty = valid)."""
+    """Return the list of required columns missing from `header` (empty = valid).
+    Comparison is whitespace/case/underscore-vs-space tolerant."""
     required = DOC_TYPES[doc_type]["required_columns"]
-    header = header or []
-    return [c for c in required if c not in header]
+    normalized_header = {_normalize_col(h) for h in (header or [])}
+    return [c for c in required if _normalize_col(c) not in normalized_header]
 
 
 def save_batch_csv(batch_id: str, doc_type: str, file_obj) -> int:
-    """Validate and persist an uploaded CSV. Raises ValueError on schema mismatch
-    or an empty file. Returns the number of data rows saved."""
+    """Validate and persist an uploaded CSV. Raises ValueError (with the columns
+    actually found, for diagnosis) on schema mismatch or an empty file. Rewrites
+    the file with canonical column names/order so downstream code can always
+    rely on the exact required_columns names regardless of source formatting.
+    Returns the number of data rows saved."""
     raw = file_obj.read()
     text = raw.decode("utf-8-sig") if isinstance(raw, bytes) else raw
+    text = text.lstrip("﻿")
 
-    reader = csv.DictReader(io.StringIO(text))
-    missing = validate_csv_columns(doc_type, reader.fieldnames)
+    delimiter = _detect_delimiter(text[:2000])
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    header = [h.strip() for h in (reader.fieldnames or []) if h]
+
+    missing = validate_csv_columns(doc_type, header)
     if missing:
-        raise ValueError(f"Missing required column(s): {', '.join(missing)}")
+        found = ", ".join(header) if header else "(none — the file may be empty or use an unrecognized format)"
+        raise ValueError(f"Missing required column(s): {', '.join(missing)}. Columns found in your file: {found}")
 
     rows = list(reader)
     if not rows:
         raise ValueError("CSV has no data rows.")
 
+    required = DOC_TYPES[doc_type]["required_columns"]
+    norm_to_actual = {_normalize_col(h): h for h in header}
+    canonical_rows = [
+        {col: row.get(norm_to_actual.get(_normalize_col(col), col), "") for col in required}
+        for row in rows
+    ]
+
     os.makedirs(_batch_dir(batch_id), exist_ok=True)
     with open(_csv_path(batch_id, doc_type), "w", encoding="utf-8", newline="") as f:
-        f.write(text)
+        writer = csv.DictWriter(f, fieldnames=required)
+        writer.writeheader()
+        writer.writerows(canonical_rows)
     return len(rows)
 
 
