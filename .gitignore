@@ -1,6 +1,7 @@
 venv/
 .env
 data/batch_uploads/
+data/batch_knowledge/
 __pycache__/
 *.pyc
 *.pkl

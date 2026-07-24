@@ -287,7 +287,7 @@ with st.sidebar:
         if role == "Admin":
             st.markdown("<hr style='border-color:rgba(255,255,255,0.06);margin:10px 0'>", unsafe_allow_html=True)
             st.markdown("<p style='color:rgba(255,255,255,0.35);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px'>Admin panels</p>", unsafe_allow_html=True)
-            admin_panel = st.radio("Panel", ["📊 Dashboard","🎫 Escalation Queue","⏱️ SLA Tracker","✉️ AI Reply Composer","📚 FAQ Manager","📈 Analytics","🗄️ Knowledge Base"], label_visibility="collapsed")
+            admin_panel = st.radio("Panel", ["📊 Dashboard","🎫 Escalation Queue","⏱️ SLA Tracker","✉️ AI Reply Composer","📚 FAQ Manager","📈 Analytics","🗄️ Knowledge Base","🗂️ Batch Knowledge"], label_visibility="collapsed")
         st.markdown("<hr style='border-color:rgba(255,255,255,0.06);margin:10px 0'>", unsafe_allow_html=True)
         if st.button("🚪 Logout", use_container_width=True):
             st.session_state.auth = {"logged_in": False, "role": None, "user": None}
@@ -354,12 +354,24 @@ if role == "Student":
         with st.chat_message("user", avatar="👤"): st.markdown(prompt)
         with st.chat_message("assistant", avatar="🎓"):
             with st.spinner("Looking up verified DPU information..."):
-                from rag.pipeline import answer
-                result = answer(prompt, batch_id, language)
-                if result.get("is_redirect") and user:
-                    result = {**result,
-                              "answer": erp_personal_answer(prompt, user, language),
-                              "sources": ["DPU ERP Student Record"]}
+                from rag.pipeline import answer, check_layer0
+                from rag.batch_knowledge import check_batch_knowledge
+
+                # Priority: ERP (Layer 0) -> Batch Knowledge (CSV) -> existing FAQ/Website RAG
+                layer0 = check_layer0(prompt)
+                if layer0:
+                    if user:
+                        result = {**layer0,
+                                  "answer": erp_personal_answer(prompt, user, language),
+                                  "sources": ["DPU ERP Student Record"]}
+                    else:
+                        result = {**layer0, "sources": []}
+                else:
+                    batch_hit = check_batch_knowledge(
+                        prompt, batch_id, batch_label.replace(" — ", " "),
+                        user["name"].split()[0] if user else None
+                    )
+                    result = batch_hit if batch_hit else answer(prompt, batch_id, language)
             st.markdown(result["answer"])
             if result.get("sources"):
                 st.markdown(" ".join([f'<span class="source-chip">📄 {s}</span>' for s in result["sources"]]), unsafe_allow_html=True)
@@ -564,6 +576,37 @@ elif role == "Admin":
         html += "</table></div>"
         st.markdown(html, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── BATCH KNOWLEDGE MANAGEMENT ────────────────────────────────
+    # Checked before the generic "Knowledge" match below, since "Batch
+    # Knowledge" also contains the substring "Knowledge".
+    elif "Batch Knowledge" in admin_panel:
+        from rag.batch_knowledge import DOC_TYPES, save_batch_csv, uploaded_status
+        st.markdown("<h2 style='color:#e2e8f4;font-size:20px;font-weight:600;margin-bottom:4px'>🗂️ Batch Knowledge Management</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='color:#5a7a9a;font-size:13px;margin-bottom:20px'>Upload the Session Schedule and Exam Timetable CSVs for each batch. Student chat answers timetable/exam questions ONLY from these files.</p>", unsafe_allow_html=True)
+
+        bk_batch_label = st.selectbox("Batch", list(BATCHES.keys()), key="bk_batch_sel")
+        bk_batch_id = BATCHES[bk_batch_label]
+        status = uploaded_status(bk_batch_id)
+
+        col_s, col_e = st.columns(2)
+        for col, doc_type in [(col_s, "session_schedule"), (col_e, "exam_timetable")]:
+            with col:
+                meta = DOC_TYPES[doc_type]
+                st.markdown(f'<div class="adm-card"><div class="adm-card-title">📅 {meta["label"]}</div>', unsafe_allow_html=True)
+                if status[doc_type]:
+                    st.markdown('<span class="sub-green">✅ Uploaded</span>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<span class="sub-amber">⚠️ Not uploaded yet</span>', unsafe_allow_html=True)
+                up = st.file_uploader(f"Upload {meta['label']} CSV", type=["csv"], key=f"bk_upload_{doc_type}")
+                if up and st.button(f"💾 Save {meta['label']}", key=f"bk_save_{doc_type}"):
+                    try:
+                        n = save_batch_csv(bk_batch_id, doc_type, up)
+                        st.success(f"✅ Saved — {n} rows")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(f"❌ {e}")
+                st.markdown("</div>", unsafe_allow_html=True)
 
     # ── KNOWLEDGE BASE ───────────────────────────────────────────
     elif "Knowledge" in admin_panel:
